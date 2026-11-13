@@ -1,0 +1,12 @@
+# Cloudflare Wrangler 本地缓存
+.wrangler/
+
+# 无头测试 / 临时产物
+_cprofile*/
+_*.mjs
+_*.mp3
+_*.js.map
+
+# 系统文件
+Thumbs.db
+.DS_Store

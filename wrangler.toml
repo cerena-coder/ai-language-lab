@@ -1,0 +1,11 @@
+name = "ailab-tts"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+
+# 说明：
+# 1. 安装 wrangler：npm install -g wrangler
+# 2. 登录：       wrangler login
+# 3. 部署：       wrangler deploy
+# 部署成功后终端会输出 https://ailab-tts.<你的子域>.workers.dev
+# 把该地址填进网站的「🎙 声音 → 微软Edge在线(免费) → Edge TTS 地址」即可。
+# 全程免费、无需 API key、不绑卡。
