@@ -1,0 +1,19 @@
+{
+  "items": [],
+  "_example": {
+    "说明": "把视频/音频放进本目录，并在 items 里加一条记录，任意设备打开网站即可『用这个建课』",
+    "字段": {
+      "title": "课程标题（可选，缺省用 file 名）",
+      "file": "media 目录下的文件名，如 sample.mp4（相对路径，同源由 GitHub Pages 托管）",
+      "type": "可省，按扩展名自动判断；audio 或 video",
+      "level": "可省，难度档，如 A2 / B1 / C1",
+      "subs": "可省，同目录的字幕文件名，如 sample.vtt；登记后会自动解析时间轴"
+    },
+    "示例": {
+      "title": "我的演示视频",
+      "file": "sample.mp4",
+      "level": "B1",
+      "subs": "sample.vtt"
+    }
+  }
+}

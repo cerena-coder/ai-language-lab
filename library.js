@@ -89,8 +89,26 @@ const Lib={
   textName:'',
   mediaURLs:{},       // blobId -> objectURL
   el:null, rate:1, ab:false, curSent:-1, missing:false,
-  sampleLink:'https://weixin.qq.com/sph/A1BaBI04QR'
+  sampleLink:'https://weixin.qq.com/sph/A1BaBI04QR',
+  manifest:null,      // 仓库 media/manifest.json 解析后的素材清单 [{title,file,type,subs,level}]
+  manifestLoaded:false
 };
+/* 仓库里的视频：把 mp4/mp3 放进 media/ 目录，配一份 media/manifest.json，
+   任意设备打开网站就能直接点「用这个建课」，无需逐台重新上传文件本体。
+   相对路径同源，由 GitHub Pages 直接托管，跨设备天然可用。 */
+function isRepoMedia(m){ return !!(m && m.url && /^media[/\\]/.test(m.url)); }
+function libLoadMediaManifest(){
+  if(Lib.manifestLoaded) return;
+  Lib.manifestLoaded=true;
+  fetch('media/manifest.json',{cache:'no-store'}).then(function(r){
+    if(!r.ok) return null;
+    return r.json().catch(function(){ return null; });
+  }).then(function(j){
+    if(!j||!Array.isArray(j.items)) return;
+    Lib.manifest=j.items.filter(function(x){return x&&x.file;});
+    if(R.view==='diy') paint();
+  }).catch(function(){ /* 没有 manifest 是常态，静默忽略 */ });
+}
 function libResetForm(){ Lib.subs=null; Lib.mediaFile=null; Lib.textName=''; }
 
 /* ---------- 字幕解析：SRT / VTT / LRC ---------- */
@@ -177,21 +195,42 @@ function libMediaLabel(m){
   if(!m||m.kind==='none') return '纯文本';
   if(m.kind==='file') return (m.type==='audio'?'本地音频':'本地视频');
   if(m.kind==='embed') return m.label+' 内嵌';
-  if(m.kind==='url') return m.label;
+  if(m.kind==='url') return isRepoMedia(m)?(m.type==='audio'?'仓库音频':'仓库视频'):m.label;
   return m.label+'（仅跳转）';
 }
 function libSourceTag(m){
   if(!m) return '文章';
   if(m.kind==='file') return m.type==='audio'?'音频':'视频';
-  if(m.kind==='url') return m.type==='audio'?'音频':'视频';
+  if(m.kind==='url') return isRepoMedia(m)?(m.type==='audio'?'音频':'视频'):(m.type==='audio'?'音频':'视频');
   if(m.kind==='embed') return '内嵌视频';
   if(m.kind==='external') return '外链';
   return '文章';
 }
 
 /* ---------- 页面：我的素材库 ---------- */
+function libManifestHTML(){
+  if(!Lib.manifest||!Lib.manifest.length) return '';
+  const items=Lib.manifest.map(function(x,i){
+    const isAudio=/\.(mp3|wav|m4a|aac|flac|opus)(\?|#|$)/i.test(x.file);
+    return '<div class="repo-item'+(isAudio?' audio':'')+'">'+
+      '<div class="ri-top"><span class="lib-kind '+(isAudio?'audio':'media')+'">'+(isAudio?'音频':'视频')+'</span>'+
+        (x.level?'<span class="li-level">'+esc(x.level)+'</span>':'')+'</div>'+
+      '<div class="ri-title">'+esc(x.title||x.file)+'</div>'+
+      '<div class="ri-file">'+libIco('file',11)+' '+esc(x.file)+'</div>'+
+      (x.subs?'<div class="ri-subs">'+libIco('clock',11)+' 含字幕 '+esc(x.subs)+'</div>':'')+
+      '<div class="ri-acts"><button class="mini-btn" data-act="libUseRepo" data-i="'+i+'">用这个建课</button></div>'+
+    '</div>';
+  }).join('');
+  return '<div class="card repo-media">'+
+    '<div><div class="eyebrow">REPO MEDIA · 仓库里的素材</div>'+
+      '<div class="sec-title" style="font-size:17px">放在 media/ 目录的视频 / 音频</div>'+
+      '<p>这些文件随网站一起托管在 GitHub Pages，<b>任意设备打开同一网址就能直接建课播放</b>，不必逐台重新上传。想新增素材，把文件放进 <code>media/</code> 目录并在 <code>media/manifest.json</code> 登记即可（见仓库根目录说明）。</p></div>'+
+    '<div class="repo-grid">'+items+'</div>'+
+  '</div>';
+}
 function renderMyLib(){
   const list=S.diy||[];
+  libLoadMediaManifest();
   return ''+
   '<section class="lib-hero">'+
     '<div class="lib-hero-top"><span>MY LIBRARY · 我的素材库</span><span>BUILD YOUR OWN COURSE</span></div>'+
@@ -240,10 +279,10 @@ function renderMyLib(){
     '</div>'+
 
     '<div class="field" style="margin-top:16px"><label>或者粘贴视频 / 音频链接</label>'+
-      '<input id="libVideoUrl" placeholder="mp4 直链、B站、YouTube；微信视频号链接只能记录并跳转">'+
+      '<input id="libVideoUrl" placeholder="mp4 直链、media/xxx.mp4 仓库相对路径、B站、YouTube">'+
       '<div class="lib-link-row">'+
         '<button class="mini-btn" data-act="libUseSph" title="把这条视频号链接填入输入框">'+libIco('link',12)+' 用这条视频号链接</button>'+
-        '<span>微信视频号不允许第三方网页内嵌播放 → 会保存为跳转链接，六步改用浏览器朗读。</span>'+
+        '<span>直链 / 仓库相对路径（如 <code>media/sample.mp4</code>）可逐句跳转；微信视频号只作跳转记录。</span>'+
       '</div></div>'+
 
     '<div class="lib-submit">'+
@@ -259,6 +298,8 @@ function renderMyLib(){
   (list.length?'<div class="lib-grid">'+list.map(libItemHTML).join('')+'</div>':
     '<div class="card empty"><h3>还没有导入过素材</h3><p>在上面粘贴一段英文，或上传字幕 + 视频，就能生成属于你自己的第一课。</p></div>')+
 
+  libManifestHTML()+
+
   '<div class="card lib-backup">'+
     '<div><div class="eyebrow">SYNC · 换设备接着学</div>'+
       '<div class="sec-title" style="font-size:17px">导出 / 导入学习档案</div>'+
@@ -270,7 +311,7 @@ function renderMyLib(){
     '</div>'+
   '</div>'+
 
-  '<div class="notice" style="margin-top:16px">'+svg('compass',14)+' <b>关于「加视频」的实话：</b>本地上传的 mp4/webm 能完整播放、逐句跳转和单句循环；mp4/mp3 直链、B站与 YouTube 可内嵌，但网页读不到播放进度，逐句控制不可用；<b>微信视频号链接只能在微信里打开</b>，第三方网页拿不到视频流，所以只作跳转记录。想让视频号内容获得完整能力，请把视频另存为 mp4 后从上方上传。素材版权归原作者，仅供个人学习使用。</div>';
+  '<div class="notice" style="margin-top:16px">'+svg('compass',14)+' <b>关于「加视频」的实话：</b>本地上传的 mp4/webm 能完整播放、逐句跳转和单句循环；mp4/mp3 直链、<b>仓库相对路径（如 <code>media/sample.mp4</code>）</b>、B站与 YouTube 可内嵌，但网页读不到播放进度，逐句控制不可用（仓库路径需配套的 srt/vtt 字幕才有时间轴）；<b>微信视频号链接只能在微信里打开</b>，第三方网页拿不到视频流，所以只作跳转记录。想让视频号内容获得完整能力，请把视频另存为 mp4 后从上方上传；想让同一段视频在任意设备都不必重传，放进 <code>media/</code> 目录并登记清单最省事。素材版权归原作者，仅供个人学习使用。</div>';
 }
 function libItemHTML(c){
   const l=c.custom||{sentences:[]}, p=prog(c.id), m=c.media;
@@ -660,6 +701,33 @@ function handleLibAct(a,t,e){
       const i=document.querySelector('#libVideoUrl');
       if(i){ i.value=Lib.sampleLink; i.focus(); }
       toast('已填入视频号链接：会保存为跳转链接，不能内嵌播放');
+      return true;
+    }
+    case 'libUseRepo': {
+      const i=parseInt(t.dataset.i,10);
+      const x=Lib.manifest&&Lib.manifest[i];
+      if(!x) return true;
+      const ti=document.querySelector('#libTitle'), ui=document.querySelector('#libVideoUrl');
+      const lv=document.querySelector('#libLevel');
+      if(ti&&!ti.value.trim()) ti.value=x.title||x.file;
+      if(ui) ui.value=x.file;
+      if(lv&&x.level) lv.value=x.level;
+      /* 若清单里登记了字幕文件，自动拉取并解析，省去手动上传 */
+      if(x.subs){
+        fetch(x.subs,{cache:'no-store'}).then(function(r){return r.ok?r.text():null;}).then(function(txt){
+          if(!txt) return;
+          const subs=parseSubs(txt);
+          if(subs.length){
+            Lib.subs=subs;
+            const en=document.querySelector('#libEn');
+            if(en&&!en.value.trim()) en.value=subs.map(function(s){return s.en;}).join('\n');
+            toast('已从仓库字幕 '+x.subs+' 解析出 '+subs.length+' 句时间轴');
+          }
+        }).catch(function(){});
+      }
+      toast('已填好「'+esc(x.title||x.file)+'」，点「生成我的课程」即可建课');
+      const form=document.querySelector('.lib-form');
+      if(form) form.scrollIntoView({behavior:'smooth',block:'center'});
       return true;
     }
     case 'libGen': libGenerate(); return true;

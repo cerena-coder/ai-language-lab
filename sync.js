@@ -1,6 +1,9 @@
-/* AI 语言实验室 · 跨设备云同步
-   后端：自己部署的 Cloudflare Worker（/api/sync + KV），与发音共用同一地址。
-   同步码 = 这份学习档案的私人钥匙；进度在浏览器里字段级合并，不会互相覆盖。
+/* AI 语言实验室 · 跨设备同步
+   两条路，都是免费的：
+   1) 同步链接：把学习档案压进一条网址，另一台设备打开即合并，零服务器、零配置，随时能用；
+   2) 自动云同步：自己部署的 Cloudflare Worker（/api/sync + KV），同步码作为私人钥匙，
+      保存后自动上传、45 秒自动拉取。后端未部署时不影响第 1 条。
+   两条路都用字段级合并，多台设备各练的内容不会互相覆盖。
    依赖：app.js 的 S / save / paint / openModal / closeModal / toast / esc。 */
 (function () {
   'use strict';
@@ -26,6 +29,67 @@
   }
   function mask(k) {
     return k ? k.slice(0, 6) + '••••••••' + k.slice(-4) : '';
+  }
+
+  /* ---------------- 零后端「同步链接」 ----------------
+     把完整学习档案 gzip 压缩 + base64url 放进 URL 的 # 片段里。
+     # 片段不会发给服务器，也不会被网站日志记录；打开链接时前端自行解密合并。
+     浏览器不支持 CompressionStream 时自动退回未压缩编码，功能仍然可用。 */
+  function bytesToB64(u8) {
+    var s = '', CH = 0x8000;
+    for (var i = 0; i < u8.length; i += CH) {
+      s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+    }
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function b64ToBytes(s) {
+    var b = String(s).replace(/-/g, '+').replace(/_/g, '/');
+    while (b.length % 4) b += '=';
+    var raw = atob(b), out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  async function through(u8, stream) {
+    var rs = new Blob([u8]).stream().pipeThrough(stream);
+    return new Uint8Array(await new Response(rs).arrayBuffer());
+  }
+  async function zip(u8) {
+    if (typeof CompressionStream === 'undefined') return { p: 'j', d: u8 };
+    try { return { p: 'g', d: await through(u8, new CompressionStream('gzip')) }; }
+    catch (e) { return { p: 'j', d: u8 }; }
+  }
+  async function unzip(flag, u8) {
+    if (flag === 'j') return u8;
+    if (flag !== 'g' || typeof DecompressionStream === 'undefined')
+      throw new Error('这个浏览器不支持解压同步链接，请改用「导出档案文件」');
+    return through(u8, new DecompressionStream('gzip'));
+  }
+  async function makeLink() {
+    var payload = { v: 1, app: 'ai-language-lab', t: Date.now(), state: stateForCloud() };
+    var raw = new TextEncoder().encode(JSON.stringify(payload));
+    var z = await zip(raw);
+    return location.href.split('#')[0] + '#s=' + z.p + bytesToB64(z.d);
+  }
+  async function readLink(link) {
+    var s = String(link || ''), at = s.indexOf('#s=');
+    if (at < 0) throw new Error('这不是同步链接（缺少 #s= 片段）');
+    var code = s.slice(at + 3).trim(), flag = code.charAt(0), b64 = code.slice(1);
+    if (!/[gj]/.test(flag) || b64.length < 8) throw new Error('同步链接内容不完整');
+    var raw = await unzip(flag, b64ToBytes(b64));
+    var p;
+    try { p = JSON.parse(new TextDecoder().decode(raw)); }
+    catch (e) { throw new Error('同步链接已损坏或已被截断'); }
+    if (!p || p.app !== 'ai-language-lab' || !p.state || typeof p.state !== 'object')
+      throw new Error('同步链接里没有有效的学习档案');
+    return p;
+  }
+  async function importLink(link, quiet) {
+    var p = await readLink(link);
+    var merged = mergeState(S, p.state);
+    if (stable(merged) !== stable(S)) applyMerged(merged);
+    if (S.syncKey) schedulePush(400);
+    if (!quiet) toast('已合并另一台设备的学习档案：进度、词库、素材都回来了');
+    return { ok: true, t: p.t };
   }
 
   /* ---------------- 字段级合并 ---------------- */
@@ -182,7 +246,7 @@
   function statusText() {
     if (!S.syncKey) return '未开启 · 进度只存在这台设备';
     if (busy) return '正在同步…';
-    if (lastErr) return '云端暂不可用：' + friendly(lastErr) + '（进度仍安全保存在本机）';
+    if (lastErr) return '自动云端暂不可用（' + friendly(lastErr) + '）；进度安全保存在本机，可用「同步链接」跨设备';
     if (lastOk) return '已同步 · ' + new Date(lastOk).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     return '已开启 · 等待首次同步';
   }
@@ -205,7 +269,7 @@
   function openPanel() {
     var needDeploy = !!(lastErr && /HTTP 400|HTTP 404|HTTP 405|503|not configured|Failed to fetch|missing text/.test(lastErr));
     openModal(
-      (needDeploy ? '<div class="modal-foot" style="margin:0 0 12px;background:#fff7e6;border:1px solid #ffe0a3;color:#9a6a00">⚠ 云端同步接口尚未启用：面板与本地逻辑已就绪，部署完成后点「立即同步」即可。当前进度仍安全保存在本机。</div>' : '') +
+      (needDeploy ? '<div class="modal-foot" style="margin:0 0 12px;background:#fff7e6;border:1px solid #ffe0a3;color:#9a6a00">⚠ 自动云端接口还没启用（后端待部署）。别担心：下面的「同步链接」不需要任何服务器，现在就能跨设备接力；进度也一直安全保存在本机。</div>' : '') +
       '<span class="modal-step">☁ 跨设备同步</span>' +
       '<h3>打开网址，进度自动接着学</h3>' +
       '<p>开启后，学习进度会自动存到云端；在手机 / 另一台电脑打开<b>同一个网址</b>，填入同一个同步码，就能接着学。两台设备分别练的内容会<b>合并</b>（积分取较高、已完成课程取并集），不会互相覆盖。</p>' +
@@ -220,7 +284,20 @@
       '<button class="btn btn-line btn-sm" data-sync="now">立即同步</button>' +
       (S.syncKey ? '<button class="btn btn-line btn-sm" data-sync="off">关闭同步</button>' : '') +
       '</div>' +
-      '<div class="modal-foot">同步码会保存在这台设备的浏览器里，下次打开自动同步。<b>本地视频 / 音频文件本体不上传</b>（太大），换设备后需重新选一次文件。云端只放学习进度，不放媒体。</div>' +
+      '<div class="sync-keybox" style="margin-top:15px">' +
+        '<div class="sync-key-h">不用服务器的办法 · 同步链接 <span>免费 · 立刻可用</span></div>' +
+        '<p class="sync-hint">把当前档案（自制素材、台词、字幕时间轴、六步进度、词库、积分）压成一条网址，发到手机 / 另一台电脑打开就自动合并。云端接口没配好也能用，链接本身不含视频文件。</p>' +
+        '<div class="sync-row"><textarea id="syncLinkText" class="vp-input" rows="3" spellcheck="false" placeholder="点「生成同步链接」后这里出现网址；也可以把另一台设备发来的链接粘到这里"></textarea></div>' +
+        '<div class="sync-actions">' +
+          '<button class="btn btn-primary btn-sm" data-sync="makeLink">生成同步链接</button>' +
+          '<button class="btn btn-line btn-sm" data-sync="copyLink">复制链接</button>' +
+          '<button class="btn btn-line btn-sm" data-sync="importLink">导入这个链接</button>' +
+          '<button class="btn btn-line btn-sm" data-sync="exportFile">导出档案文件</button>' +
+          '<button class="btn btn-line btn-sm" data-sync="importFile">导入档案文件</button>' +
+          '<input type="file" id="syncProfileFile" accept=".json,application/json" hidden>' +
+        '</div>' +
+      '</div>' +
+      '<div class="modal-foot">同步码会保存在这台设备的浏览器里，下次打开自动同步；同步链接则是「一次性的快照」，另一台设备打开后会与本机进度合并。<b>视频 / 音频文件本体不进链接、也不进云端</b>（太大）：想让别的设备也能播，请在「我的素材库」给素材<b>绑定云端直链</b>，或把视频放进仓库的 media 目录。</div>' +
       '<div class="modal-actions" style="margin-top:14px"><button class="btn btn-line btn-sm" data-sync="close">关闭</button></div>'
     );
     updateUI();
@@ -234,6 +311,17 @@
   }
 
   /* ---------------- 事件 ---------------- */
+  function linkBox() { return document.getElementById('syncLinkText'); }
+  function copyText(text, okMsg) {
+    var fallback = function () {
+      var b = linkBox();
+      if (b) { b.value = text; b.focus(); b.select(); }
+      toast('请手动复制已选中的链接');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText)
+      navigator.clipboard.writeText(text).then(function () { toast(okMsg); }, fallback);
+    else fallback();
+  }
   document.addEventListener('click', function (e) {
     var t = e.target.closest ? e.target.closest('[data-sync]') : null;
     if (!t) return;
@@ -256,6 +344,35 @@
       return;
     }
     if (a === 'now') { if (!S.syncKey) { toast('请先开启同步'); return; } pull().then(function () { schedulePush(200); }); return; }
+    if (a === 'makeLink') {
+      toast('正在打包学习档案…');
+      makeLink().then(function (url) {
+        var b = linkBox(); if (b) b.value = url;
+        toast(url.length > 8000
+          ? '档案较大，链接约 ' + url.length + ' 字符；建议改用「导出档案文件」更稳'
+          : '同步链接已生成（' + url.length + ' 字符），复制到另一台设备打开即可');
+      }).catch(function (err) { toast('生成失败：' + (err && err.message || err)); });
+      return;
+    }
+    if (a === 'copyLink') {
+      var v = linkBox() ? linkBox().value.trim() : '';
+      if (!v) { toast('请先生成或粘贴同步链接'); return; }
+      copyText(v, '同步链接已复制，发到另一台设备打开即可'); return;
+    }
+    if (a === 'importLink') {
+      var raw = linkBox() ? linkBox().value.trim() : '';
+      if (!raw) { toast('请先粘贴另一台设备的同步链接'); return; }
+      importLink(raw).then(function () { closeModal(); })
+        .catch(function (err) { toast('导入失败：' + (err && err.message || err)); });
+      return;
+    }
+    if (a === 'exportFile') {
+      if (typeof window.libExport === 'function') window.libExport();
+      else toast('导出功能尚未就绪'); return;
+    }
+    if (a === 'importFile') {
+      var fi = document.getElementById('syncProfileFile'); if (fi) fi.click(); return;
+    }
     if (a === 'off') {
       delete S.syncKey; lastErr = ''; lastOk = 0;
       clearTimeout(pushTimer); clearInterval(pollTimer); pollTimer = null;
@@ -263,6 +380,44 @@
       openPanel(); toast('已关闭云同步，进度仍保存在本机'); return;
     }
   });
+
+  /* 同步面板里的「导入档案文件」 */
+  document.addEventListener('change', function (e) {
+    if (!e.target || e.target.id !== 'syncProfileFile') return;
+    var f = e.target.files && e.target.files[0]; if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      try {
+        var raw = JSON.parse(String(rd.result || 'null'));
+        if (raw && !Array.isArray(raw) && raw.kind === 'full-profile' && raw.state) {
+          if (typeof window.libRestoreProfile === 'function') window.libRestoreProfile(raw.state);
+          else {
+            var m = mergeState(S, raw.state);
+            if (stable(m) !== stable(S)) applyMerged(m);
+          }
+          closeModal();
+        } else toast('请选择本站导出的「学习档案」JSON 文件');
+      } catch (err) { toast('档案文件不是有效的 JSON'); }
+      e.target.value = '';
+    };
+    rd.readAsText(f, 'utf-8');
+  });
+
+  /* 打开别人发来的同步链接：自动合并，然后把 # 片段从地址栏抹掉 */
+  function consumeHashLink() {
+    if ((location.hash || '').indexOf('#s=') < 0) return;
+    var full = location.href;
+    var clear = function () {
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { }
+    };
+    importLink(full, true).then(function () {
+      clear(); updateUI();
+      toast('已通过同步链接接上另一台设备的学习档案');
+    }).catch(function (err) {
+      clear();
+      toast('同步链接无效：' + (err && err.message || err) + '；本机进度未改动');
+    });
+  }
 
   /* 每次保存后自动上传（防抖）；页面可见时定期拉取其它设备的改动 */
   var origSave = window.save;
@@ -282,6 +437,7 @@
   function boot() {
     if (S.syncKey) { pull(); startPolling(); }
     updateUI();
+    consumeHashLink();
   }
   boot();
 
@@ -290,6 +446,7 @@
     genKey: genKey, mergeState: mergeState, stable: stable, stateForCloud: stateForCloud,
     pull: pull, push: push, openPanel: openPanel, updateUI: updateUI, endpoint: endpoint,
     syncURL: syncURL, setKey: setKey,
+    makeLink: makeLink, readLink: readLink, importLink: importLink, consumeHashLink: consumeHashLink,
     status: function () { return { key: S.syncKey || '', busy: busy, lastOk: lastOk, lastErr: lastErr }; }
   };
 })();
