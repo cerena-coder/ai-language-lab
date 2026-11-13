@@ -339,16 +339,58 @@ async function edgeTTS(text, voice, rate, pitch) {
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
   'Access-Control-Allow-Headers': '*'
 };
 
+/* ---------- 学习档案云同步（Cloudflare KV） ----------
+   同步码就是这份档案的私人凭证：随机十六进制串，知道码的人可读写。
+   前端负责字段级合并，服务端只保存最近一次写入的完整档案。
+   没有绑定 KV 时返回明确的 503，绝不假装同步成功。 */
+const SYNC_PATH = '/api/sync';
+const SYNC_KEY_RE = /^[a-f0-9]{16,64}$/i;
+const SYNC_MAX_BYTES = 900 * 1024;
+
+function syncJson(obj, status){
+  return new Response(JSON.stringify(obj), {
+    status: status || 200,
+    headers: Object.assign({}, CORS, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store'
+    })
+  });
+}
+async function handleSync(request, env, url){
+  const kv = env && env.SYNC_KV;
+  if(!kv) return syncJson({ok:false,error:'sync store not configured'},503);
+  const key = (url.searchParams.get('k') || '').trim();
+  if(!SYNC_KEY_RE.test(key)) return syncJson({ok:false,error:'bad sync key'},400);
+  const kvKey = 'profile:' + key.toLowerCase();
+  if(request.method === 'GET'){
+    const raw = await kv.get(kvKey);
+    if(!raw) return syncJson({ok:true,empty:true},200);
+    try{ return syncJson({ok:true,payload:JSON.parse(raw)},200); }
+    catch(e){ return syncJson({ok:false,error:'corrupt data'},500); }
+  }
+  if(request.method === 'PUT'){
+    const body = await request.text();
+    if(body.length > SYNC_MAX_BYTES) return syncJson({ok:false,error:'payload too large'},413);
+    let p; try{ p = JSON.parse(body); }catch(e){ return syncJson({ok:false,error:'bad json'},400); }
+    if(!p || !p.state || typeof p.state !== 'object') return syncJson({ok:false,error:'bad payload'},400);
+    const ts = Date.now();
+    await kv.put(kvKey, JSON.stringify({state:p.state, ts:ts}));
+    return syncJson({ok:true,ts:ts},200);
+  }
+  return syncJson({ok:false,error:'method not allowed'},405);
+}
+
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
     const url = new URL(request.url);
+    if (url.pathname === SYNC_PATH) return handleSync(request, env, url);
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ ok: true, gec: 'v2', version: SEC_MS_GEC_VERSION }),
+      return new Response(JSON.stringify({ ok: true, gec: 'v2', version: SEC_MS_GEC_VERSION, sync: !!(env && env.SYNC_KV) }),
         { headers: Object.assign({}, CORS, { 'Content-Type': 'application/json' }) });
     }
     const text = url.searchParams.get('text') || '';
