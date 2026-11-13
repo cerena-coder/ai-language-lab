@@ -1,6 +1,11 @@
 name = "ailab-tts"
 main = "worker.js"
 compatibility_date = "2024-09-23"
+account_id = "128deaa811c11762b17dd6c98b3d0185"
+
+[[kv_namespaces]]
+binding = "SYNC_KV"
+id = "85926138679c452d80910cfdfa7b45d8"
 
 # 说明：
 # 1. 安装 wrangler：npm install -g wrangler
