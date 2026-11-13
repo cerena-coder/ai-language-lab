@@ -396,6 +396,17 @@
             if (stable(m) !== stable(S)) applyMerged(m);
           }
           closeModal();
+        } else if (Array.isArray(raw)) {
+          /* 也接受「素材数组」格式（与「我的素材库 → 导入学习档案」一致） */
+          var ids = {}; (S.diy || []).forEach(function (c) { ids[c.id] = 1; });
+          var n = 0;
+          raw.forEach(function (c) {
+            if (!c || !c.id || !c.custom || !c.custom.sentences || ids[c.id]) return;
+            S.diy.push(c); ids[c.id] = 1; n++;
+          });
+          if (n) { try { save(); } catch (e) { } try { paint(); } catch (e) { } }
+          closeModal();
+          toast(n ? ('已导入 ' + n + ' 篇素材（媒体文件需重新选择）') : '没有可导入的新素材（可能已存在）');
         } else toast('请选择本站导出的「学习档案」JSON 文件');
       } catch (err) { toast('档案文件不是有效的 JSON'); }
       e.target.value = '';

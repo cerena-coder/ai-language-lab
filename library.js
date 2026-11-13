@@ -306,7 +306,7 @@ function renderMyLib(){
       '<p>学习进度只存在<b>当前这台设备的浏览器里</b>，不会自动云同步。想在手机 / 另一台电脑接着学：在这里<b>导出学习档案</b>（含积分、六步进度、词库、生词本、闯关成绩、自制素材），把 JSON 传过去，再在另一台设备打开同一个网址<b>导入</b>即可。<b>本地视频 / 音频文件本体不会打包</b>，需自行保留原文件并重新选择一次。</p></div>'+
     '<div class="lib-backup-btns">'+
       '<button class="btn btn-line btn-sm" data-act="libExport">'+libIco('down',13)+' 导出学习档案</button>'+
-      '<input type="file" id="libBackupFile" accept=".json,application/json">'+
+      '<label class="btn btn-line btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">'+libIco('upload',13)+' 导入学习档案<input type="file" id="libBackupFile" accept=".json,application/json" hidden></label>'+
       '<button class="btn btn-line btn-sm" data-act="libCleanMedia">'+svg('trash',13)+' 清理孤立媒体文件</button>'+
     '</div>'+
   '</div>'+
