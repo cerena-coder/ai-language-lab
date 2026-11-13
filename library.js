@@ -838,7 +838,7 @@ function libKeepAsNewSubs(){
 /* ---------- 自动提取视频文字：① 读取内嵌字幕轨（mp4/m4v/mov） ---------- */
 function libExtractEmbeddedSubs(c){
   if(!c||!c.media||c.media.kind!=='file'){ toast('只有本机上传的视频才能提取内嵌字幕'); return; }
-  if(typeof MP4Box==='undefined'){ toast('字幕解析库未加载（需联网 CDN）；请改用上传 srt 或语音听写'); return; }
+  if(typeof MP4Box==='undefined'){ toast('字幕解析库未加载，请刷新页面重试；或改用上传 srt / 语音听写'); return; }
   if(!/\.(mp4|m4v|mov)$/i.test(c.media.name||'')){ toast('内嵌字幕提取目前只支持 mp4 / m4v / mov 容器；其它格式请用语音听写或上传 srt'); return; }
   toast('正在读取本地视频并尝试提取内嵌字幕…');
   MediaDB.get(c.media.blobId).then(function(rec){
