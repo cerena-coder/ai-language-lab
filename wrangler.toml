@@ -9,3 +9,12 @@ compatibility_date = "2024-09-23"
 # 部署成功后终端会输出 https://ailab-tts.<你的子域>.workers.dev
 # 把该地址填进网站的「🎙 声音 → 微软Edge在线(免费) → Edge TTS 地址」即可。
 # 全程免费、无需 API key、不绑卡。
+#
+# ---- 学习档案云同步（可选，需要 KV）----
+# 首次启用同步接口前，先执行一次：
+#   wrangler kv namespace create SYNC_KV
+# 把输出里的 id 填进下面，并去掉这三行行首的 # 号：
+# [[kv_namespaces]]
+# binding = "SYNC_KV"
+# id = "填 namespace id"
+# 未绑定 KV 时 /api/sync 会返回明确的 503，前端提示「云端暂不可用」，不会假装同步成功。
