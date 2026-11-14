@@ -10,3 +10,7 @@ _*.js.map
 # 系统文件
 Thumbs.db
 .DS_Store
+
+# 本地分享产出（二维码/短链/长链，含课程数据，不进公开仓库）
+share-*.txt
+share-*.png
