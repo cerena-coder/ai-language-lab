@@ -384,6 +384,18 @@ async function handleSync(request, env, url){
   return syncJson({ok:false,error:'method not allowed'},405);
 }
 
+/* ============ 短链重定向（分享用） ============
+   把很长的分享链接压成 https://<本Worker>/s/<code>，
+   二维码扫码后 302 跳转到 GitHub Pages 的 #s= 长链接，前端自动导入。 */
+async function handleShort(request, env, url) {
+  if (!env || !env.SYNC_KV) return new Response('short links not configured', { status: 503, headers: CORS });
+  const code = url.pathname.slice('/s/'.length).replace(/[^A-Za-z0-9]/g, '');
+  if (!code) return new Response('missing code', { status: 400, headers: CORS });
+  const target = await env.SYNC_KV.get('short:' + code);
+  if (!target) return new Response('not found', { status: 404, headers: CORS });
+  return new Response(null, { status: 302, headers: { 'Location': target } });
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
@@ -393,6 +405,7 @@ export default {
       return new Response(JSON.stringify({ ok: true, gec: 'v2', version: SEC_MS_GEC_VERSION, sync: !!(env && env.SYNC_KV) }),
         { headers: Object.assign({}, CORS, { 'Content-Type': 'application/json' }) });
     }
+    if (url.pathname.startsWith('/s/')) return handleShort(request, env, url);
     const text = url.searchParams.get('text') || '';
     const voice = url.searchParams.get('voice') || 'en-US-AriaNeural';
     const rate = url.searchParams.get('rate') || '0%';
